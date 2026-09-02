@@ -1,0 +1,25 @@
+[build-system]
+requires = ["scikit-build-core>=0.9", "pybind11>=2.11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "casiahand-sdk"
+version = "0.1.0"
+description = "Self-contained Python bindings and async runtime for the CASIA Hand-M C++ SDK"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.scikit-build]
+cmake.version = ">=3.16"
+cmake.build-type = "Release"
+wheel.packages = ["src/casiahand_sdk", "src/casia_hand_cpp"]
+sdist.include = ["sdk/**", "integrations/**", "examples/**", "tests/**", "LICENSES/**"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+lint.select = ["E", "F", "I", "B", "UP"]
