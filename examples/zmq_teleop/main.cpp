@@ -14,19 +14,11 @@
 #include <cstring>
 #include <atomic>
 #include <csignal>
+#include <pthread.h>
 
 // Keep physical-hand ports aligned with dex_teleop's CASIA sim2real channels.
 constexpr int CASIA_REAL_LEFT_PORT = 5555;
 constexpr int CASIA_REAL_RIGHT_PORT = 5556;
-
-namespace {
-volatile std::sig_atomic_t shutdown_requested = 0;
-
-void handle_shutdown_signal(int)
-{
-    shutdown_requested = 1;
-}
-}  // namespace
 
 /**
  * Simple JSON parser for ZMQ message format:
@@ -456,8 +448,21 @@ private:
 
 int main(int argc, char *argv[])
 {
-    std::signal(SIGINT, handle_shutdown_signal);
-    std::signal(SIGTERM, handle_shutdown_signal);
+    // Block termination signals before any serial or application worker is
+    // created. All later threads inherit this mask, so Ctrl+C cannot interrupt
+    // an in-flight RS485 syscall and leave the adapter/device transaction in an
+    // indeterminate state. The main thread consumes the signal synchronously.
+    sigset_t shutdown_signals;
+    sigemptyset(&shutdown_signals);
+    sigaddset(&shutdown_signals, SIGINT);
+    sigaddset(&shutdown_signals, SIGTERM);
+    const int mask_error = pthread_sigmask(SIG_BLOCK, &shutdown_signals, nullptr);
+    if (mask_error != 0)
+    {
+        std::cerr << "[FATAL] Failed to block shutdown signals: "
+                  << std::strerror(mask_error) << std::endl;
+        return 2;
+    }
 
     // Hand configuration
     int left_hand_id = 2;
@@ -523,11 +528,12 @@ int main(int argc, char *argv[])
 
     std::cout << "[Main] Teleoperator running. Press Ctrl+C to exit." << std::endl;
 
-    // The signal handler only sets a flag. Joining threads and destroying SDK
-    // resources here keeps shutdown operations out of signal context.
-    while (!shutdown_requested)
+    int received_signal = 0;
+    const int wait_error = sigwait(&shutdown_signals, &received_signal);
+    if (wait_error != 0)
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::cerr << "[ERROR] Failed while waiting for shutdown signal: "
+                  << std::strerror(wait_error) << std::endl;
     }
 
     std::cout << "\n[Main] Shutdown requested; joining workers and closing serial..." << std::endl;

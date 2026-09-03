@@ -102,7 +102,10 @@ Press `Ctrl+C` once to stop the C++ subscriber. SIGINT and SIGTERM trigger an
 orderly shutdown: command, state, and subscriber threads are joined; the SDK
 worker finishes its current serial transaction; then the serial fd and ZMQ
 sockets are closed. Wait for `[Main] Clean shutdown complete.` before starting
-another instance.
+another instance. Shutdown signals are blocked in all worker threads and
+handled synchronously by `main`, so `Ctrl+C` cannot interrupt an active RS485
+read or write. On the next start, the SDK clears stale serial data and waits
+250 ms for the USB adapter before probing both device IDs.
 
 ## Publisher modes
 
@@ -180,6 +183,13 @@ example. Open both TCP ports in the firewall. Do not use
   and reconnect it, then confirm the device node before retrying.
 - initialization reports a missing hand: verify both IDs and baud rate; this
   dual-hand SDK intentionally refuses to start with only one hand online.
+- the port opens but both hands are missing after a restart: make sure this
+  executable was rebuilt after updating the repository. The startup log should
+  pause briefly after `Serial port ... openned` while the adapter settles. If
+  the problem persists, try the real device node (for example
+  `/dev/ttyCH341USB0`) instead of a temporary symlink and power-cycle the hand
+  controller once; include the new `invalid response` diagnostic, if present,
+  when reporting the result.
 - commands are received but motion is unexpected: stop immediately and verify
   the 10-element motor order above.
 - no ZMQ messages arrive: start the publisher first and verify that the

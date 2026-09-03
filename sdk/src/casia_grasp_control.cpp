@@ -14,6 +14,7 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <thread>
 
 using namespace casia::HandM;
 namespace casia
@@ -71,6 +72,20 @@ bool CasiaHandMControl::Init()
     int left_error = 0;  int right_error = 0;
     com_port_connected_ = true;
     printf(FONT_GREEN "CasiaHandMControl: Serial port %s openned\r\n" FONT_CLEAR, port_name_.c_str());
+
+    // CH34x and similar USB/serial adapters can remain open before their RX
+    // path is ready, especially immediately after another process closes the
+    // port. Discard stale bytes, then allow one short quiet period before the
+    // first device probe.
+    try {
+      com_port_->flush();
+    } catch (const std::exception &e) {
+      std::cout << e.what() << std::endl;
+      com_port_connected_ = false;
+      return false;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+
     handm_list_[LEFT_HANDM_INDEX].reset(new(CasiaHandMProbuf)(l_handm_dev_id_, com_port_));
     handm_list_[RIGHT_HANDM_INDEX].reset(new(CasiaHandMProbuf)(r_handm_dev_id_, com_port_));
     

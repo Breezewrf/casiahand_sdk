@@ -20,27 +20,50 @@ CasiaHandMProbuf::~CasiaHandMProbuf(){
 
 int CasiaHandMProbuf::start()
 {
-  std::vector<uint8_t> output; output.clear();
-  std::vector<uint8_t> input; input.clear();
-  uint32_t retry_counter = 0;
+  std::vector<uint8_t> output;
   ReadParamRegister(output,casia::HandMP_COM_ID_VAL_INDEX);
-  do
-  {
-    ComWriteData(output);
-    ComReadData(input,64);
-    if(input.empty()){
-      printf(FONT_RED "hand device id: %d not found.\r\n" FONT_CLEAR, dev_id_);
+
+  for (uint32_t retry_counter = 0; retry_counter < 3; ++retry_counter) {
+    std::vector<uint8_t> input;
+    try {
+      // A previous process or a timed-out transaction can leave bytes queued
+      // in the USB/TTY receive path. Never use those bytes as this probe's
+      // response.
+      com_port_->flushInput();
+    } catch (const std::exception &e) {
+      serial_dev_exception_ = true;
       dev_online_ = false;
+      std::cout << e.what() << std::endl;
+      return -1;
     }
-    else{
+
+    const bool wrote = ComWriteData(output);
+    const bool read = wrote && ComReadData(
+        input, static_cast<uint32_t>(casia::HandM_RS485_CMD_RW_PARAM_DATA_LEN));
+    const bool complete = read &&
+        input.size() == casia::HandM_RS485_CMD_RW_PARAM_DATA_LEN;
+    const bool addressed_to_device = complete &&
+        input[0] == casia::HandM_RS485_CMD_HEAD_L &&
+        input[1] == casia::HandM_RS485_CMD_HEAD_H &&
+        input[2] == static_cast<uint8_t>(dev_id_);
+    const bool returned_expected_id = complete &&
+        ((((static_cast<uint16_t>(input[7]) << 8) & 0xff00) + input[6]) ==
+         static_cast<uint16_t>(dev_id_));
+
+    if (addressed_to_device && returned_expected_id && DevcheckSumCheck(input)) {
       dev_online_ = true;
-      break;
+      return 0;
     }
-    retry_counter++;
-  }while(!dev_online_&&(retry_counter < 3));
-  if(dev_online_){
-   return 0;
+
+    dev_online_ = false;
+    if (input.empty()) {
+      printf(FONT_RED "hand device id: %d not found.\r\n" FONT_CLEAR, dev_id_);
+    } else {
+      printf(FONT_RED "hand device id: %d returned an invalid response (%zu bytes).\r\n"
+             FONT_CLEAR, dev_id_, input.size());
+    }
   }
+
   return -1;
 }
 
