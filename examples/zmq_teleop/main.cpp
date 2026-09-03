@@ -273,10 +273,21 @@ public:
         join_thread(state_thread_);
         join_thread(command_thread_);
 
-        // Releasing the final SDK owner stops and joins its serial worker,
-        // then closes the serial port. This runs from normal control flow,
-        // never from a signal handler.
-        hand_.reset();
+        if (hand_)
+        {
+            // Releasing the final SDK owner stops and joins its serial worker,
+            // then closes the serial port. This runs from normal control flow,
+            // never from a signal handler.
+            hand_.reset();
+
+            // OmniHand's serial reconnect path leaves a two-second quiet
+            // interval between close() and the next open(). Enforce the same
+            // recovery window before returning control to the shell so a
+            // Jetson user cannot immediately reopen the CH341 adapter.
+            std::cout << "[Main] Serial closed; waiting 2 seconds for adapter recovery..."
+                      << std::endl;
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+        }
     }
 
 private:
