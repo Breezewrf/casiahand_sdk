@@ -264,7 +264,8 @@ The original non-RoboJuDo teleop is retained under
 vendored SDK used by the Python extension and accepts separate left/right ZMQ
 JSON streams. Its physical-hand defaults match dex_teleop: left port `5555`,
 right port `5556` (`5560/5561` remain reserved for simulation). See its README
-for dependencies, exact message schema, build and safe startup instructions.
+for dependencies, exact message schema, build, graceful `Ctrl+C` shutdown, and
+safe startup instructions.
 
 ## Vendor SDK changes included here
 
@@ -274,6 +275,9 @@ The vendored SDK is minimally adjusted for Python/runtime safety:
   cached sample
 - state is published only after a successful serial measurement
 - failed initialization can be destroyed safely
+- SIGINT/SIGTERM in the standalone teleop joins all workers before closing the
+  SDK serial handle and ZMQ sockets
+- partially opened serial fds are closed if termios configuration fails
 - the control-thread flag is atomic and state structures are initialized
 - command angles are clamped in radians to the SDK's physical scaling limits
 - power commands are clamped to the per-motor physical scaling limits

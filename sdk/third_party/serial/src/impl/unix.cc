@@ -152,7 +152,15 @@ Serial::SerialImpl::open ()
     }
   }
 
-  reconfigurePort();
+  try {
+    reconfigurePort();
+  } catch (...) {
+    // reconfigurePort() can fail after ::open() succeeded. is_open_ is still
+    // false in that case, so close() would otherwise leave this fd behind.
+    ::close(fd_);
+    fd_ = -1;
+    throw;
+  }
   is_open_ = true;
 }
 
@@ -462,18 +470,16 @@ Serial::SerialImpl::reconfigurePort ()
 void
 Serial::SerialImpl::close ()
 {
-  if (is_open_ == true) {
-    if (fd_ != -1) {
-      int ret;
-      ret = ::close (fd_);
-      if (ret == 0) {
-        fd_ = -1;
-      } else {
-        THROW (IOException, errno);
-      }
+  if (fd_ != -1) {
+    int ret;
+    ret = ::close (fd_);
+    if (ret == 0) {
+      fd_ = -1;
+    } else {
+      THROW (IOException, errno);
     }
-    is_open_ = false;
   }
+  is_open_ = false;
 }
 
 bool

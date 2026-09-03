@@ -13,10 +13,20 @@
 #include <mutex>
 #include <cstring>
 #include <atomic>
+#include <csignal>
 
 // Keep physical-hand ports aligned with dex_teleop's CASIA sim2real channels.
 constexpr int CASIA_REAL_LEFT_PORT = 5555;
 constexpr int CASIA_REAL_RIGHT_PORT = 5556;
+
+namespace {
+volatile std::sig_atomic_t shutdown_requested = 0;
+
+void handle_shutdown_signal(int)
+{
+    shutdown_requested = 1;
+}
+}  // namespace
 
 /**
  * Simple JSON parser for ZMQ message format:
@@ -142,6 +152,10 @@ private:
     void *zmq_socket_left_;
     void *zmq_socket_right_;
     std::atomic<bool> running_;
+    std::thread left_subscriber_thread_;
+    std::thread right_subscriber_thread_;
+    std::thread state_thread_;
+    std::thread command_thread_;
     std::mutex state_mutex_;
     casia::HandM::handm_target_set_t current_target_;
     casia::HandM::handm_state_get_t current_state_;
@@ -175,7 +189,7 @@ public:
                 zmq_setsockopt(zmq_socket_right_, ZMQ_SUBSCRIBE, "", 0);
 
         // Set socket options
-        int timeout = 1000; // 1 second timeout
+        int timeout = 100; // bounded shutdown latency
                 zmq_setsockopt(zmq_socket_left_, ZMQ_RCVTIMEO, &timeout, sizeof(timeout));
                 zmq_setsockopt(zmq_socket_right_, ZMQ_RCVTIMEO, &timeout, sizeof(timeout));
 
@@ -246,32 +260,40 @@ public:
     void start()
     {
         // Subscriber threads - receive commands from dedicated ZMQ ports
-        std::thread left_subscriber_thread([this]()
-                                           { zmq_subscriber_loop(true); });
-        left_subscriber_thread.detach();
+        left_subscriber_thread_ = std::thread([this]()
+                                              { zmq_subscriber_loop(true); });
 
-        std::thread right_subscriber_thread([this]()
-                                            { zmq_subscriber_loop(false); });
-        right_subscriber_thread.detach();
+        right_subscriber_thread_ = std::thread([this]()
+                                               { zmq_subscriber_loop(false); });
 
         // State publisher thread - reads and displays hand state
-        std::thread state_thread([this]()
-                                 { hand_state_loop(); });
-        state_thread.detach();
+        state_thread_ = std::thread([this]()
+                                    { hand_state_loop(); });
 
         // Hand command thread - sends targets to hand
-        std::thread command_thread([this]()
-                                   { hand_command_loop(); });
-        command_thread.detach();
+        command_thread_ = std::thread([this]()
+                                      { hand_command_loop(); });
     }
 
     void stop()
     {
         running_ = false;
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        join_thread(left_subscriber_thread_);
+        join_thread(right_subscriber_thread_);
+        join_thread(state_thread_);
+        join_thread(command_thread_);
+        // Destroying the SDK stops and joins its serial worker before closing
+        // the serial file descriptor. reset() is idempotent for repeated stop().
+        hand_.reset();
     }
 
 private:
+    static void join_thread(std::thread &thread)
+    {
+        if (thread.joinable())
+            thread.join();
+    }
+
     /**
      * Main subscriber loop - receives JSON commands from ZMQ
      */
@@ -434,6 +456,9 @@ private:
 
 int main(int argc, char *argv[])
 {
+    std::signal(SIGINT, handle_shutdown_signal);
+    std::signal(SIGTERM, handle_shutdown_signal);
+
     // Hand configuration
     int left_hand_id = 2;
     int right_hand_id = 0x20;
@@ -498,11 +523,16 @@ int main(int argc, char *argv[])
 
     std::cout << "[Main] Teleoperator running. Press Ctrl+C to exit." << std::endl;
 
-    // Keep the main thread running
-    while (true)
+    // The signal handler only sets a flag. Joining threads and destroying SDK
+    // resources here keeps shutdown operations out of signal context.
+    while (!shutdown_requested)
     {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
+
+    std::cout << "\n[Main] Shutdown requested; joining workers and closing serial..." << std::endl;
+    teleop.stop();
+    std::cout << "[Main] Clean shutdown complete." << std::endl;
 
     return 0;
 }

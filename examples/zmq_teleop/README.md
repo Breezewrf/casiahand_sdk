@@ -98,6 +98,12 @@ The publisher waits one second after binding to allow the ZMQ subscriptions to
 settle. PUB/SUB messages sent before the connection is established are not
 replayed.
 
+Press `Ctrl+C` once to stop the C++ subscriber. SIGINT and SIGTERM trigger an
+orderly shutdown: command, state, and subscriber threads are joined; the SDK
+worker finishes its current serial transaction; then the serial fd and ZMQ
+sockets are closed. Wait for `[Main] Clean shutdown complete.` before starting
+another instance.
+
 ## Publisher modes
 
 ```bash
@@ -168,6 +174,10 @@ example. Open both TCP ports in the firewall. Do not use
 - `Package libzmq was not found`: install `libzmq3-dev` and ensure
   `pkg-config --modversion libzmq` succeeds.
 - `can not find port`: check enumeration and dialout permissions.
+- `Input/output error` while opening the port: first confirm that no old process
+  owns it with `lsof /dev/ttyUSB0` or `fuser /dev/ttyUSB0`. If no process owns
+  the device, the USB-serial driver or adapter may be in an error state; unplug
+  and reconnect it, then confirm the device node before retrying.
 - initialization reports a missing hand: verify both IDs and baud rate; this
   dual-hand SDK intentionally refuses to start with only one hand online.
 - commands are received but motion is unexpected: stop immediately and verify
