@@ -105,7 +105,9 @@ sockets are closed. Wait for `[Main] Clean shutdown complete.` before starting
 another instance. Shutdown signals are blocked in all worker threads and
 handled synchronously by `main`, so `Ctrl+C` cannot interrupt an active RS485
 read or write. On the next start, the SDK clears stale serial data and waits
-250 ms for the USB adapter before probing both device IDs.
+250 ms for the USB adapter before probing both device IDs. Device probing also
+handles USB/RS485 adapters that echo the transmitted request before returning
+the hand's response.
 
 ## Publisher modes
 
@@ -188,8 +190,9 @@ example. Open both TCP ports in the firewall. Do not use
   pause briefly after `Serial port ... openned` while the adapter settles. If
   the problem persists, try the real device node (for example
   `/dev/ttyCH341USB0`) instead of a temporary symlink and power-cycle the hand
-  controller once; include the new `invalid response` diagnostic, if present,
-  when reporting the result.
+  controller once. `received only the local TX echo` means that the adapter is
+  working but the hand did not answer; include that diagnostic when reporting
+  the result.
 - commands are received but motion is unexpected: stop immediately and verify
   the 10-element motor order above.
 - no ZMQ messages arrive: start the publisher first and verify that the

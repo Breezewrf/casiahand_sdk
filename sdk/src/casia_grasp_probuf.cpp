@@ -22,6 +22,11 @@ int CasiaHandMProbuf::start()
 {
   std::vector<uint8_t> output;
   ReadParamRegister(output,casia::HandMP_COM_ID_VAL_INDEX);
+  constexpr size_t frame_length = casia::HandM_RS485_CMD_RW_PARAM_DATA_LEN;
+  // Many CH34x/RS485 interfaces return the transmitted 9-byte request before
+  // the hand's 9-byte reply. Read enough for both instead of mistaking the
+  // local echo for the device response or leaving the reply queued.
+  constexpr size_t probe_read_length = 2 * frame_length;
 
   for (uint32_t retry_counter = 0; retry_counter < 3; ++retry_counter) {
     std::vector<uint8_t> input;
@@ -38,19 +43,32 @@ int CasiaHandMProbuf::start()
     }
 
     const bool wrote = ComWriteData(output);
-    const bool read = wrote && ComReadData(
-        input, static_cast<uint32_t>(casia::HandM_RS485_CMD_RW_PARAM_DATA_LEN));
-    const bool complete = read &&
-        input.size() == casia::HandM_RS485_CMD_RW_PARAM_DATA_LEN;
-    const bool addressed_to_device = complete &&
-        input[0] == casia::HandM_RS485_CMD_HEAD_L &&
-        input[1] == casia::HandM_RS485_CMD_HEAD_H &&
-        input[2] == static_cast<uint8_t>(dev_id_);
-    const bool returned_expected_id = complete &&
-        ((((static_cast<uint16_t>(input[7]) << 8) & 0xff00) + input[6]) ==
-         static_cast<uint16_t>(dev_id_));
+    const bool read = wrote && ComReadData(input, probe_read_length);
+    bool found_device_response = false;
 
-    if (addressed_to_device && returned_expected_id && DevcheckSumCheck(input)) {
+    // Scan rather than assuming an offset: adapters may suppress the echo,
+    // return it, or prepend a small amount of stale data.
+    if (read && input.size() >= frame_length) {
+      for (size_t offset = 0; offset + frame_length <= input.size(); ++offset) {
+        if (input[offset] != casia::HandM_RS485_CMD_HEAD_L ||
+            input[offset + 1] != casia::HandM_RS485_CMD_HEAD_H ||
+            input[offset + 2] != static_cast<uint8_t>(dev_id_)) {
+          continue;
+        }
+
+        std::vector<uint8_t> frame(input.begin() + offset,
+                                   input.begin() + offset + frame_length);
+        const uint16_t returned_id =
+            (static_cast<uint16_t>(frame[7]) << 8) | frame[6];
+        if (returned_id == static_cast<uint16_t>(dev_id_) &&
+            DevcheckSumCheck(frame)) {
+          found_device_response = true;
+          break;
+        }
+      }
+    }
+
+    if (found_device_response) {
       dev_online_ = true;
       return 0;
     }
@@ -58,8 +76,11 @@ int CasiaHandMProbuf::start()
     dev_online_ = false;
     if (input.empty()) {
       printf(FONT_RED "hand device id: %d not found.\r\n" FONT_CLEAR, dev_id_);
+    } else if (input == output) {
+      printf(FONT_RED "hand device id: %d received only the local TX echo.\r\n"
+             FONT_CLEAR, dev_id_);
     } else {
-      printf(FONT_RED "hand device id: %d returned an invalid response (%zu bytes).\r\n"
+      printf(FONT_RED "hand device id: %d has no valid reply in %zu received bytes.\r\n"
              FONT_CLEAR, dev_id_, input.size());
     }
   }
