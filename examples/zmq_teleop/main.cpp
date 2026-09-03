@@ -142,6 +142,10 @@ private:
     void *zmq_socket_left_;
     void *zmq_socket_right_;
     std::atomic<bool> running_;
+    std::thread left_subscriber_thread_;
+    std::thread right_subscriber_thread_;
+    std::thread state_thread_;
+    std::thread command_thread_;
     std::mutex state_mutex_;
     casia::HandM::handm_target_set_t current_target_;
     casia::HandM::handm_state_get_t current_state_;
@@ -246,32 +250,42 @@ public:
     void start()
     {
         // Subscriber threads - receive commands from dedicated ZMQ ports
-        std::thread left_subscriber_thread([this]()
-                                           { zmq_subscriber_loop(true); });
-        left_subscriber_thread.detach();
+        left_subscriber_thread_ = std::thread([this]()
+                                              { zmq_subscriber_loop(true); });
 
-        std::thread right_subscriber_thread([this]()
-                                            { zmq_subscriber_loop(false); });
-        right_subscriber_thread.detach();
+        right_subscriber_thread_ = std::thread([this]()
+                                               { zmq_subscriber_loop(false); });
 
         // State publisher thread - reads and displays hand state
-        std::thread state_thread([this]()
-                                 { hand_state_loop(); });
-        state_thread.detach();
+        state_thread_ = std::thread([this]()
+                                    { hand_state_loop(); });
 
         // Hand command thread - sends targets to hand
-        std::thread command_thread([this]()
-                                   { hand_command_loop(); });
-        command_thread.detach();
+        command_thread_ = std::thread([this]()
+                                      { hand_command_loop(); });
     }
 
     void stop()
     {
         running_ = false;
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        join_thread(left_subscriber_thread_);
+        join_thread(right_subscriber_thread_);
+        join_thread(state_thread_);
+        join_thread(command_thread_);
+
+        // Releasing the final SDK owner stops and joins its serial worker,
+        // then closes the serial port. This runs from normal control flow,
+        // never from a signal handler.
+        hand_.reset();
     }
 
 private:
+    static void join_thread(std::thread &thread)
+    {
+        if (thread.joinable())
+            thread.join();
+    }
+
     /**
      * Main subscriber loop - receives JSON commands from ZMQ
      */
@@ -496,13 +510,23 @@ int main(int argc, char *argv[])
     // Start controller threads
     teleop.start();
 
-    std::cout << "[Main] Teleoperator running. Press Ctrl+C to exit." << std::endl;
+    std::cout << "[Main] Teleoperator running. Type q then press Enter to exit cleanly."
+              << std::endl;
 
-    // Keep the main thread running
-    while (true)
+    // Deliberately avoid SIGINT for the normal shutdown path: a terminal input
+    // cannot interrupt an in-flight CASIA serial transaction in another
+    // thread. EOF also requests an orderly shutdown.
+    std::string input;
+    while (std::getline(std::cin, input))
     {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (input == "q" || input == "quit")
+            break;
     }
+
+    std::cout << "[Main] Shutdown requested; joining workers and closing serial..."
+              << std::endl;
+    teleop.stop();
+    std::cout << "[Main] Clean shutdown complete." << std::endl;
 
     return 0;
 }
