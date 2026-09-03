@@ -17,7 +17,7 @@ test = ["pytest>=7"]
 cmake.version = ">=3.16"
 cmake.build-type = "Release"
 wheel.packages = ["src/casiahand_sdk", "src/casia_hand_cpp"]
-sdist.include = ["sdk/**", "integrations/**", "examples/**", "tests/**", "LICENSES/**"]
+sdist.include = ["sdk/**", "integrations/**", "examples/**", "tests/**", "udev/**", "LICENSES/**"]
 
 [tool.ruff]
 line-length = 120

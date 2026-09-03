@@ -155,7 +155,8 @@ get_sysfs_info(const string& device_path)
 
     string sys_device_path = format( "/sys/class/tty/%s/device", device_name.c_str() );
 
-    if( device_name.compare(0,6,"ttyUSB") == 0 )
+    if( device_name.compare(0,6,"ttyUSB") == 0 ||
+        device_name.compare(0,11,"ttyCH341USB") == 0 )
     {
         sys_device_path = dirname( dirname( realpath( sys_device_path ) ) );
 
@@ -303,6 +304,9 @@ serial::list_ports()
     search_globs.push_back("/dev/ttyACM*");
     search_globs.push_back("/dev/ttyS*");
     search_globs.push_back("/dev/ttyUSB*");
+    // WCH's out-of-tree CH340/CH341 Linux driver uses ttyCH341USB<N>
+    // instead of the kernel usb-serial driver's ttyUSB<N> convention.
+    search_globs.push_back("/dev/ttyCH341USB*");
     search_globs.push_back("/dev/tty.*");
     search_globs.push_back("/dev/cu.*");
     search_globs.push_back("/dev/rfcomm*");

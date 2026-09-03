@@ -26,6 +26,7 @@ casiahand_sdk/
 ├── src/casia_hand_cpp/            # legacy import compatibility
 ├── integrations/robojudo/         # RoboJuDo adapter and config addition
 ├── examples/zmq_teleop/           # standalone dual-stream ZMQ teleop
+├── udev/                           # persistent Linux serial permissions
 └── tests/                          # hardware-free runtime tests
 ```
 
@@ -205,16 +206,31 @@ All methods that may enter C++ release the Python GIL. Do not call one
 
 ## Hardware setup
 
-Identify the serial device and grant access before starting RoboJuDo:
+Identify the serial device and grant access before starting RoboJuDo. The
+vendored serial enumerator supports both the standard Linux `/dev/ttyUSB<N>`
+name and WCH's `/dev/ttyCH341USB<N>` name; do not create a compatibility
+symlink between them.
 
 ```bash
-ls -l /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
+ls -l /dev/ttyUSB* /dev/ttyCH341USB* /dev/ttyACM* 2>/dev/null
 sudo usermod -aG dialout "$USER"
 ```
 
-Log out and back in after changing group membership. A temporary development
-alternative is `sudo chmod 666 /dev/ttyUSB0`, but persistent udev/group rules
-are preferable.
+Install the included persistent permissions rule on the host, not inside a
+Docker container:
+
+```bash
+sudo install -m 0644 udev/99-casiahand-usb.rules \
+  /etc/udev/rules.d/99-casiahand-usb.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=tty
+```
+
+Log out and back in after changing group membership. If RoboJuDo runs in
+Docker, the real device node must also be passed to the container (for example
+`--device=/dev/ttyCH341USB0`). A temporary development alternative is
+`sudo chmod 666 /dev/ttyCH341USB0`, but the udev rule avoids repeating that
+after every reconnect.
 
 Default protocol settings are:
 

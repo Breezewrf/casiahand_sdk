@@ -76,6 +76,22 @@ In another terminal, start the hardware subscriber:
   115200
 ```
 
+When using WCH's out-of-tree CH341 driver, pass its real device name directly:
+
+```bash
+./build/zmq_teleop/casia_zmq_teleop \
+  tcp://127.0.0.1:5555 \
+  tcp://127.0.0.1:5556 \
+  /dev/ttyCH341USB0 \
+  2 \
+  0x20 \
+  115200
+```
+
+The SDK enumerates both `/dev/ttyUSB<N>` and `/dev/ttyCH341USB<N>`; no symlink
+is required. Install the repository's `udev/99-casiahand-usb.rules` on the host
+to make permissions persistent across USB reconnects.
+
 Arguments are positional:
 
 ```text
@@ -167,7 +183,9 @@ example. Open both TCP ports in the firewall. Do not use
 
 - `Package libzmq was not found`: install `libzmq3-dev` and ensure
   `pkg-config --modversion libzmq` succeeds.
-- `can not find port`: check enumeration and dialout permissions.
+- `can not find port`: use the real device path. Both `/dev/ttyUSB<N>` and
+  `/dev/ttyCH341USB<N>` are supported; rebuild after updating the SDK. Check
+  host-side udev permissions and Docker `--device` mapping if applicable.
 - initialization reports a missing hand: verify both IDs and baud rate; this
   dual-hand SDK intentionally refuses to start with only one hand online.
 - commands are received but motion is unexpected: stop immediately and verify

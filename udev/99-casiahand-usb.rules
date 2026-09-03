@@ -1,0 +1,6 @@
+# CASIA Hand-M USB serial permissions
+#
+# Standard in-kernel usb-serial names and WCH's out-of-tree CH341 driver names.
+# Install this file on the host under /etc/udev/rules.d/, then reload udev.
+KERNEL=="ttyUSB[0-9]*", MODE="0666", GROUP="dialout"
+KERNEL=="ttyCH341USB[0-9]*", MODE="0666", GROUP="dialout"
