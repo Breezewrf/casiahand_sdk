@@ -73,6 +73,7 @@ namespace casia
       CasiaHandMControl(int l_handm_id, int r_handm_id, int baudrate, std::string port_name = "/dev/ttyUSB0");
       ~CasiaHandMControl();
       bool Init();
+      void Shutdown();
       bool StartHandMControlThread();
       void SetHandMTargetoQueue(casia::HandM::handm_target_set_t &target);
       bool GetHandMStateFromQueue(casia::HandM::handm_state_get_t &state);
@@ -105,6 +106,8 @@ namespace casia
     private:
       std::thread handm_control_thread_;
       std::atomic<bool> run_flag_{false};
+      std::mutex shutdown_mutex_;
+      bool shutdown_complete_ = false;
       casia::HandM::handm_param_get_t handm_param_get{};
       casia::HandM::handm_target_set_t handm_target_set{};
       casia::HandM::handm_state_get_t handm_state_get{};

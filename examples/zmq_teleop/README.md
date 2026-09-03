@@ -114,6 +114,22 @@ The publisher waits one second after binding to allow the ZMQ subscriptions to
 settle. PUB/SUB messages sent before the connection is established are not
 replayed.
 
+## Shutdown behavior
+
+Type `q` and press Enter to request an orderly shutdown. The executable stops
+and joins all four example workers, stops and joins the SDK serial worker,
+discards residual tty input/output, closes the serial file descriptor, closes
+both ZMQ sockets with zero linger, and terminates the ZMQ context before it
+returns to the shell. The shutdown path is idempotent, so destructor cleanup
+cannot close the same descriptor twice.
+
+This releases every resource owned by the process. It intentionally does not
+kill other processes using the tty and does not unbind or reset the kernel USB
+driver. On Jetson systems, disappearance of the device from `lsusb`, USB
+descriptor errors such as `-110`/`-71`, or failure to recreate the tty after a
+physical reconnect is below the application layer and cannot be repaired by
+closing additional application file descriptors.
+
 ## Publisher modes
 
 ```bash

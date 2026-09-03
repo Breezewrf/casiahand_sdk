@@ -25,16 +25,61 @@ namespace casia
 
 
 CasiaHandMControl::~CasiaHandMControl(){
+  Shutdown();
+  delete com_port_;
+  com_port_ = nullptr;
+}
+
+void CasiaHandMControl::Shutdown(){
+  std::lock_guard<std::mutex> shutdown_lock(shutdown_mutex_);
+  if (shutdown_complete_)
+  {
+    return;
+  }
+
   run_flag_ = false;
-  if (handm_control_thread_.joinable()) 
+  if (handm_control_thread_.joinable())
   {
     handm_control_thread_.join();
   }
-  if (com_port_ != nullptr && com_port_->isOpen()) {
-    com_port_->close();
-  }
+
+  // Protocol objects must stop referring to the shared serial object before
+  // its file descriptor is closed.
   handm_list_.clear();
-  delete com_port_;
+
+  if (com_port_ != nullptr && com_port_->isOpen())
+  {
+    // No worker can be in a transaction after the join above. Discard any
+    // bytes left in the tty queues instead of carrying a partial RS485 frame
+    // into the driver close path. A flush failure must not prevent close().
+    try
+    {
+      com_port_->flushInput();
+      com_port_->flushOutput();
+    }
+    catch (const std::exception &error)
+    {
+      std::cerr << "CasiaHandMControl: serial flush during shutdown failed: "
+                << error.what() << std::endl;
+    }
+
+    try
+    {
+      com_port_->close();
+    }
+    catch (const std::exception &error)
+    {
+      // The vendored serial implementation invalidates its local descriptor
+      // before reporting close errors, so it cannot close a recycled fd later.
+      std::cerr << "CasiaHandMControl: serial close reported an error: "
+                << error.what() << std::endl;
+    }
+  }
+
+  com_port_connected_ = false;
+  l_handm_connected_ = false;
+  r_handm_connected_ = false;
+  shutdown_complete_ = true;
 }
 
 bool CasiaHandMControl::Init()

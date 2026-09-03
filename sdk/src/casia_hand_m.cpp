@@ -10,11 +10,20 @@ namespace casia
         }
         CasiaHandM::~CasiaHandM()
         {
+            shutdown();
             delete hand_control_;
+            hand_control_ = nullptr;
         }
         bool CasiaHandM::init()
         {
             return hand_control_->Init();
+        }
+        void CasiaHandM::shutdown()
+        {
+            if (hand_control_ != nullptr)
+            {
+                hand_control_->Shutdown();
+            }
         }
         void CasiaHandM::setHandTargetoQueue(casia::HandM::handm_target_set_t &target)
         {

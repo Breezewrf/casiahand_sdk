@@ -15,6 +15,7 @@ namespace casia
             CasiaHandM(const CasiaHandM &) = delete;
             CasiaHandM &operator=(const CasiaHandM &) = delete;
             bool init();
+            void shutdown();
             void setHandTargetoQueue(casia::HandM::handm_target_set_t &target);
             bool getHandStateFromQueue(casia::HandM::handm_state_get_t &state);
         private:

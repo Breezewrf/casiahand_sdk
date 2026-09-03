@@ -110,7 +110,9 @@ runtime = CasiaHandRuntime(
 ```
 
 The controller or pipeline that owns the runtime must call `close()` during
-shutdown.
+shutdown. `close()` waits until the runtime worker has released the native SDK
+and its serial file descriptor; it does not return while a background worker
+still owns the tty.
 
 ## Runtime API
 
@@ -295,6 +297,8 @@ The vendored SDK is minimally adjusted for Python/runtime safety:
 - power commands are clamped to the per-motor physical scaling limits
 - initialization requires both configured hands to be online
 - copying the owning `CasiaHandM` object is disabled
+- shutdown is explicit and idempotent: the SDK worker is joined, residual tty
+  queues are discarded, and the serial descriptor is closed exactly once
 
 These changes are necessary for trustworthy Recorder freshness semantics.
 

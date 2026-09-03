@@ -272,7 +272,8 @@ class CasiaHandRuntime:
         self._stop.set()
         thread = self._thread
         if thread is not None:
-            thread.join(timeout=3.0)
-            if thread.is_alive():
-                logger.warning("CASIA Hand runtime did not stop within 3 seconds")
+            # Do not return while the worker still owns the native SDK/tty.
+            # CASIA serial transactions have their own bounded timeout, so an
+            # unconditional join provides a real close guarantee to callers.
+            thread.join()
             self._thread = None

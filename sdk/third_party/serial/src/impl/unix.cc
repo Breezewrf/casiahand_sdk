@@ -121,7 +121,13 @@ Serial::SerialImpl::SerialImpl (const string &port, unsigned long baudrate,
 
 Serial::SerialImpl::~SerialImpl ()
 {
-  close();
+  // Destructors must not throw. close() invalidates fd_ before invoking the
+  // system call, which also prevents a failed close from being retried on a
+  // descriptor number that the process may already have reused.
+  try {
+    close();
+  } catch (...) {
+  }
   pthread_mutex_destroy(&this->read_mutex);
   pthread_mutex_destroy(&this->write_mutex);
 }
@@ -464,11 +470,11 @@ Serial::SerialImpl::close ()
 {
   if (is_open_ == true) {
     if (fd_ != -1) {
-      int ret;
-      ret = ::close (fd_);
-      if (ret == 0) {
-        fd_ = -1;
-      } else {
+      const int fd_to_close = fd_;
+      fd_ = -1;
+      is_open_ = false;
+      const int ret = ::close (fd_to_close);
+      if (ret != 0) {
         THROW (IOException, errno);
       }
     }

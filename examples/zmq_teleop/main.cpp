@@ -142,6 +142,7 @@ private:
     void *zmq_socket_left_;
     void *zmq_socket_right_;
     std::atomic<bool> running_;
+    std::atomic<bool> shutdown_started_{false};
     std::thread left_subscriber_thread_;
     std::thread right_subscriber_thread_;
     std::thread state_thread_;
@@ -204,12 +205,6 @@ public:
     ~HandTeleoperator()
     {
         stop();
-        if (zmq_socket_left_)
-            zmq_close(zmq_socket_left_);
-        if (zmq_socket_right_)
-            zmq_close(zmq_socket_right_);
-        if (zmq_context_)
-            zmq_ctx_destroy(zmq_context_);
     }
 
     bool initialize()
@@ -267,7 +262,16 @@ public:
 
     void stop()
     {
+        if (shutdown_started_.exchange(true))
+            return;
+
         running_ = false;
+
+        // Wake blocking ZMQ receives immediately. The sockets are closed only
+        // after their owning loops have returned.
+        if (zmq_context_)
+            zmq_ctx_shutdown(zmq_context_);
+
         join_thread(left_subscriber_thread_);
         join_thread(right_subscriber_thread_);
         join_thread(state_thread_);
@@ -275,22 +279,41 @@ public:
 
         if (hand_)
         {
-            // Releasing the final SDK owner stops and joins its serial worker,
-            // then closes the serial port. This runs from normal control flow,
-            // never from a signal handler.
+            // Explicitly stop the SDK worker and close the serial fd before
+            // releasing the final SDK owner. shutdown() is idempotent.
+            hand_->shutdown();
             hand_.reset();
-
-            // OmniHand's serial reconnect path leaves a two-second quiet
-            // interval between close() and the next open(). Enforce the same
-            // recovery window before returning control to the shell so a
-            // Jetson user cannot immediately reopen the CH341 adapter.
-            std::cout << "[Main] Serial closed; waiting 2 seconds for adapter recovery..."
-                      << std::endl;
-            std::this_thread::sleep_for(std::chrono::seconds(2));
         }
+
+        close_zmq_socket(zmq_socket_left_);
+        close_zmq_socket(zmq_socket_right_);
+        if (zmq_context_)
+        {
+            if (zmq_ctx_term(zmq_context_) != 0)
+                std::cerr << "[Shutdown] Failed to terminate ZMQ context: "
+                          << zmq_strerror(zmq_errno()) << std::endl;
+            zmq_context_ = nullptr;
+        }
+
+        std::cout << "[Shutdown] SDK worker stopped; serial fd, ZMQ sockets, and "
+                     "ZMQ context released by this process."
+                  << std::endl;
     }
 
 private:
+    static void close_zmq_socket(void *&socket)
+    {
+        if (!socket)
+            return;
+
+        const int linger_ms = 0;
+        zmq_setsockopt(socket, ZMQ_LINGER, &linger_ms, sizeof(linger_ms));
+        if (zmq_close(socket) != 0)
+            std::cerr << "[Shutdown] Failed to close ZMQ socket: "
+                      << zmq_strerror(zmq_errno()) << std::endl;
+        socket = nullptr;
+    }
+
     static void join_thread(std::thread &thread)
     {
         if (thread.joinable())
