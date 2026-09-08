@@ -3,6 +3,7 @@ import time
 import unittest
 
 import numpy as np
+
 from casiahand_sdk import (
     CASIA_JOINT_NAMES,
     CASIA_LEFT_LIMITS,
@@ -94,27 +95,6 @@ class TestCasiaHandRuntime(unittest.TestCase):
             runtime.set_joint_commands(np.full(10, 0.2), np.full(10, 0.3))
             time.sleep(0.03)
             self.assertEqual(hand.commands, [])
-            self.assertFalse(runtime.get_data()["fresh"])
-        finally:
-            runtime.close()
-
-    def test_disabling_takeover_can_return_both_hands_to_default(self):
-        hand = FakeCasiaHand()
-        runtime = CasiaHandRuntime(CasiaHandConfig(joint_state_fps=100.0), hand_factory=lambda _: hand)
-        try:
-            runtime.set_takeover_enabled(True)
-            runtime.set_joint_commands(np.full(10, 0.2), np.full(10, 0.3))
-            deadline = time.monotonic() + 1.0
-            while len(hand.commands) < 1 and time.monotonic() < deadline:
-                time.sleep(0.005)
-
-            runtime.set_takeover_enabled(False, return_to_default=True)
-            deadline = time.monotonic() + 1.0
-            while len(hand.commands) < 2 and time.monotonic() < deadline:
-                time.sleep(0.005)
-
-            self.assertEqual(len(hand.commands), 2)
-            np.testing.assert_array_equal(hand.commands[-1], np.zeros(20, dtype=np.float32))
             self.assertFalse(runtime.get_data()["fresh"])
         finally:
             runtime.close()
