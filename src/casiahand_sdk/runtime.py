@@ -70,6 +70,7 @@ class CasiaHandCommandFrame:
     joint_positions: np.ndarray
     source_timestamp_ns: int
     frame_id: int | None
+    is_return_to_default_command: bool = False
 
 
 class CasiaHandRuntime:
@@ -121,8 +122,8 @@ class CasiaHandRuntime:
             raise RuntimeError(f"CASIA SDK failed to initialize hands on {cfg.port_name}")
         return hand
 
-    def set_takeover_enabled(self, enabled: bool):
-        """Open or close the hardware command gate and invalidate pending commands."""
+    def set_takeover_enabled(self, enabled: bool, *, return_to_default: bool = False):
+        """Open or close the command gate, optionally returning both hands to zero."""
 
         enabled = bool(enabled)
         with self._lock:
@@ -133,6 +134,16 @@ class CasiaHandRuntime:
             self._applied_source_timestamp_ns = None
             self._applied_frame_id = None
         self._discard_pending_commands()
+        if not enabled and return_to_default:
+            self._enqueue_command(
+                CasiaHandCommandFrame(
+                    joint_positions=np.zeros(20, dtype=np.float32),
+                    source_timestamp_ns=time.time_ns(),
+                    frame_id=None,
+                    is_return_to_default_command=True,
+                )
+            )
+            logger.warning("CASIA Hand returning to default pose")
         logger.warning("CASIA Hand control %s", "enabled" if enabled else "disabled")
 
     def set_joint_commands(
@@ -154,6 +165,10 @@ class CasiaHandRuntime:
             source_timestamp_ns=time.time_ns() if source_timestamp_ns is None else int(source_timestamp_ns),
             frame_id=None if frame_id is None else int(frame_id),
         )
+        self._enqueue_command(command_frame)
+        return combined.astype(np.float32)
+
+    def _enqueue_command(self, command_frame: CasiaHandCommandFrame):
         try:
             self._command_queue.put_nowait(command_frame)
         except queue.Full:
@@ -162,7 +177,6 @@ class CasiaHandRuntime:
             except queue.Empty:  # pragma: no cover - no other command consumer exists
                 pass
             self._command_queue.put_nowait(command_frame)
-        return combined.astype(np.float32)
 
     @staticmethod
     def _validate_command(value, side: str) -> np.ndarray:
@@ -203,7 +217,7 @@ class CasiaHandRuntime:
                 else:
                     with self._lock:
                         enabled = self._enabled
-                    if enabled:
+                    if enabled or command_frame.is_return_to_default_command:
                         applied = self._validate_measured_positions(
                             hand.set_joint_positions(command_frame.joint_positions.tolist())
                         )
