@@ -31,10 +31,11 @@ class CasiaHand {
         left_hand_id, right_hand_id, baudrate, std::move(port_name));
   }
 
-  bool init() {
+  bool init(double timeout_s = 0.0) {
+    if (!std::isfinite(timeout_s) || timeout_s < 0) throw std::invalid_argument("timeout_s must be finite and non-negative");
     ensure_open();
     if (initialized_) return true;
-    initialized_ = hand_->init();
+    initialized_ = hand_->init(timeout_s);
     return initialized_;
   }
 
@@ -73,6 +74,25 @@ class CasiaHand {
     if (!hand_->getHandStateFromQueue(state)) return false;
     positions.assign(std::begin(state.handm_angle), std::end(state.handm_angle));
     return true;
+  }
+
+  bool try_get_joint_sample(std::vector<float>& positions, double& sampled_at) {
+    ensure_initialized();
+    casia::HandM::handm_state_get_t state{};
+    if (!hand_->getHandStateFromQueue(state)) return false;
+    positions.assign(std::begin(state.handm_angle), std::end(state.handm_angle));
+    sampled_at = static_cast<double>(state.sampled_at_ns) / 1e9;
+    return true;
+  }
+
+  bool transport_failed() const {
+    ensure_initialized();
+    return hand_->transportFailed();
+  }
+
+  void clear_joint_commands() {
+    ensure_initialized();
+    hand_->clearHandTargets();
   }
 
   void close() {
@@ -115,7 +135,7 @@ PYBIND11_MODULE(_native, module) {
           py::arg("right_hand_id") = 0x20,
           py::arg("baudrate") = 115200,
           py::arg("port_name") = "/dev/ttyUSB0")
-      .def("init", &CasiaHand::init, py::call_guard<py::gil_scoped_release>())
+      .def("init", &CasiaHand::init, py::arg("timeout_s") = 0.0, py::call_guard<py::gil_scoped_release>())
       .def(
           "set_joint_positions",
           &CasiaHand::set_joint_positions,
@@ -135,5 +155,20 @@ PYBIND11_MODULE(_native, module) {
             if (!received) return py::none();
             return py::cast(std::move(positions));
           })
+      .def(
+          "try_get_joint_sample",
+          [](CasiaHand& self) -> py::object {
+            std::vector<float> positions;
+            double sampled_at = 0.0;
+            bool received;
+            {
+              py::gil_scoped_release release;
+              received = self.try_get_joint_sample(positions, sampled_at);
+            }
+            if (!received) return py::none();
+            return py::make_tuple(std::move(positions), sampled_at);
+          })
+      .def("clear_joint_commands", &CasiaHand::clear_joint_commands, py::call_guard<py::gil_scoped_release>())
+      .def_property_readonly("transport_failed", &CasiaHand::transport_failed)
       .def("close", &CasiaHand::close, py::call_guard<py::gil_scoped_release>());
 }

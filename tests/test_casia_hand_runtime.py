@@ -1,4 +1,5 @@
 import queue
+import threading
 import time
 import unittest
 
@@ -76,6 +77,10 @@ class TestCasiaHandRuntime(unittest.TestCase):
     def test_command_queue_keeps_only_newest_clipped_atomic_frame(self):
         runtime = CasiaHandRuntime.__new__(CasiaHandRuntime)
         runtime._command_queue = queue.Queue(maxsize=1)
+        runtime._lock = threading.Lock()
+        runtime._auto_reconnect = False
+        runtime._connection_generation = 0
+        runtime._gate_epoch = 0
 
         first = runtime.set_joint_commands(np.full(10, 100.0), np.full(10, -100.0), 10, 1)
         second = runtime.set_joint_commands(np.zeros(10), np.zeros(10), 20, 2)

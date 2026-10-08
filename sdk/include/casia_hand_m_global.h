@@ -1,5 +1,6 @@
 #ifndef CASIA_HAND_M_GLOBAL_H_
 #define CASIA_HAND_M_GLOBAL_H_
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -55,6 +56,7 @@ namespace casia
         {
             float handm_angle[HANDM_DOF_NUM * HANDM_NUM];
             float handm_power[HANDM_DOF_NUM * HANDM_NUM];
+            int64_t sampled_at_ns = 0;  // Linux CLOCK_MONOTONIC; valid only after a dual-hand read.
             float handm_temp[HANDM_NUM];
             uint16_t handm_sys_state[HANDM_NUM];
             float handm_sys_soft_version[HANDM_NUM];

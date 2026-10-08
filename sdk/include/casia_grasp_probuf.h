@@ -10,6 +10,9 @@
 #pragma once
 
 #include <serial/serial.h>
+#include <chrono>
+#include <map>
+#include <string>
 
 namespace casia
 {
@@ -114,8 +117,14 @@ public:
 
   CasiaHandMProbuf(int hand_id, serial::Serial *com_port);
   ~CasiaHandMProbuf();
+  void SetStartupDeadline(std::chrono::steady_clock::time_point deadline);
+
 
 private:
+  bool PrepareSerialTransaction();
+  std::chrono::steady_clock::time_point startup_deadline_{};
+  void LogError(const std::string &message);
+  std::map<std::string, std::chrono::steady_clock::time_point> last_error_log_;
   int  dev_id_;
   bool dev_online_ = false;
   bool serial_dev_exception_ = false;

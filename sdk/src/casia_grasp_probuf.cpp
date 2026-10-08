@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <algorithm>
 #include <stdlib.h>
 #include <vector>
 #include <iostream>
@@ -400,11 +401,11 @@ bool CasiaHandMProbuf::setTargetPosPowerSpeed(float* pos_buf,float* power_buf,fl
   ComWriteData(output);
   ComReadData(input, (size_t)HandM_WRITE_CONTROL_PARAM_CMD_VAILD_LEN(2,grasp_dof_num)+5);
   if(!DevOnlineCheck(input.size(),HandM_WRITE_CONTROL_PARAM_CMD_VAILD_LEN(2,grasp_dof_num)+5)){
-     printf(FONT_RED "hand dev id: %d, setTargetPosForceSpeed timeout.\r\n" FONT_CLEAR, dev_id_);
+     LogError("setTargetPosForceSpeed timeout.");
       return false;
   }
   if(!DevcheckSumCheck(input)){
-    printf(FONT_RED "hand dev id: %d, setTargetPosForceSpeed CheckSum error.\r\n" FONT_CLEAR, dev_id_);
+    LogError("setTargetPosForceSpeed CheckSum error.");
    return false;
   } 
   for (int j = 0; j < grasp_dof_num; j++){   
@@ -439,12 +440,12 @@ bool CasiaHandMProbuf::setTargetPosPowerSpeed(float* pos_buf,float* power_buf,fl
   ComWriteData(output);
   ComReadData(input, (size_t)HandM_READ_CONTROL_STATE_ACK_CMD_VAILD_LEN(2,grasp_dof_num)+5);
   if(!DevOnlineCheck(input.size(),HandM_READ_CONTROL_STATE_ACK_CMD_VAILD_LEN(2,grasp_dof_num)+5)){
-     printf(FONT_RED "hand dev id: %d, getPosForceState timeout.\r\n" FONT_CLEAR, dev_id_);
+     LogError("getPosForceState timeout.");
       return false;
   }
   if(!DevcheckSumCheck(input))
   {
-    printf(FONT_RED "hand dev id: %d, getPosForceState CheckSum error.\r\n" FONT_CLEAR, dev_id_);
+    LogError("getPosForceState CheckSum error.");
     
 
 
@@ -459,6 +460,16 @@ bool CasiaHandMProbuf::setTargetPosPowerSpeed(float* pos_buf,float* power_buf,fl
   }  
   return true;
  }
+
+void CasiaHandMProbuf::LogError(const std::string &message)
+{
+  const auto now = std::chrono::steady_clock::now();
+  const auto found = last_error_log_.find(message);
+  if (found == last_error_log_.end() || now - found->second >= std::chrono::seconds(1)) {
+    last_error_log_[message] = now;
+    std::cerr << "CASIA device id: " << dev_id_ << " " << message << std::endl;
+  }
+}
 
 bool CasiaHandMProbuf::IsDevOnline()
 {
@@ -658,6 +669,29 @@ bool CasiaHandMProbuf::DevCrcCheck(std::vector<uint8_t> &input_data){
   return true;
 }
 
+void CasiaHandMProbuf::SetStartupDeadline(std::chrono::steady_clock::time_point deadline)
+{
+  startup_deadline_ = deadline;
+  if (deadline == std::chrono::steady_clock::time_point{}) {
+    auto timeout = serial::Timeout::simpleTimeout(2000);
+    com_port_->setTimeout(timeout);
+  }
+}
+
+bool CasiaHandMProbuf::PrepareSerialTransaction()
+{
+  if (startup_deadline_ == std::chrono::steady_clock::time_point{}) return true;
+  const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+      startup_deadline_ - std::chrono::steady_clock::now()).count();
+  if (remaining <= 0) {
+    dev_online_ = false;
+    return false;
+  }
+  auto timeout = serial::Timeout::simpleTimeout(static_cast<uint32_t>(std::min<int64_t>(2000, remaining)));
+  com_port_->setTimeout(timeout);
+  return true;
+}
+
 bool CasiaHandMProbuf::ComWriteData(std::vector<uint8_t> &output){
   if( serial_dev_exception_ )
   {
@@ -665,6 +699,7 @@ bool CasiaHandMProbuf::ComWriteData(std::vector<uint8_t> &output){
   }
   try
   {
+    if (!PrepareSerialTransaction()) return false;
     com_port_->write(output);
   }
   catch (serial::SerialException &e)
@@ -706,6 +741,7 @@ bool CasiaHandMProbuf::ComReadData(std::vector<uint8_t> &input, uint32_t read_le
   }
   try
   {
+    if (!PrepareSerialTransaction()) return false;
     com_port_->read(input, (size_t)read_len);
   }
   catch (serial::PortNotOpenedException &e)

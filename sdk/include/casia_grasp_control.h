@@ -17,6 +17,7 @@
 #include "casia_hand_m_global.h"
 #include <atomic>
 #include <queue>
+#include <map>
 
 namespace casia
 {
@@ -72,9 +73,11 @@ namespace casia
     public:
       CasiaHandMControl(int l_handm_id, int r_handm_id, int baudrate, std::string port_name = "/dev/ttyUSB0");
       ~CasiaHandMControl();
-      bool Init();
+      bool Init(double startup_timeout_s = 0.0);
       void Shutdown();
+      bool TransportFailed() const { return transport_failed_.load(); }
       bool StartHandMControlThread();
+      void ClearHandMTargets() { handm_target_set_fifo.pop(0); }
       void SetHandMTargetoQueue(casia::HandM::handm_target_set_t &target);
       bool GetHandMStateFromQueue(casia::HandM::handm_state_get_t &state);
 
@@ -106,6 +109,9 @@ namespace casia
     private:
       std::thread handm_control_thread_;
       std::atomic<bool> run_flag_{false};
+      std::atomic<bool> transport_failed_{false};
+      std::map<std::string, std::chrono::steady_clock::time_point> last_error_log_;
+      void LogTransportError(const std::string &message);
       std::mutex shutdown_mutex_;
       bool shutdown_complete_ = false;
       casia::HandM::handm_param_get_t handm_param_get{};

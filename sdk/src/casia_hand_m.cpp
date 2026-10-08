@@ -14,9 +14,9 @@ namespace casia
             delete hand_control_;
             hand_control_ = nullptr;
         }
-        bool CasiaHandM::init()
+        bool CasiaHandM::init(double startup_timeout_s)
         {
-            return hand_control_->Init();
+            return hand_control_->Init(startup_timeout_s);
         }
         void CasiaHandM::shutdown()
         {
@@ -24,6 +24,14 @@ namespace casia
             {
                 hand_control_->Shutdown();
             }
+        }
+        bool CasiaHandM::transportFailed() const
+        {
+            return hand_control_->TransportFailed();
+        }
+        void CasiaHandM::clearHandTargets()
+        {
+            hand_control_->ClearHandMTargets();
         }
         void CasiaHandM::setHandTargetoQueue(casia::HandM::handm_target_set_t &target)
         {

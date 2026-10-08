@@ -14,6 +14,7 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <limits.h>
 
 using namespace casia::HandM;
 namespace casia
@@ -82,9 +83,17 @@ void CasiaHandMControl::Shutdown(){
   shutdown_complete_ = true;
 }
 
-bool CasiaHandMControl::Init()
+bool CasiaHandMControl::Init(double startup_timeout_s)
 {
+  const auto startup_deadline = startup_timeout_s > 0
+      ? std::chrono::steady_clock::now() + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+          std::chrono::duration<double>(startup_timeout_s))
+      : std::chrono::steady_clock::time_point{};
   std::vector<serial::PortInfo> port_info =  serial::list_ports();
+  char resolved_port[PATH_MAX];
+  if (realpath(port_name_.c_str(), resolved_port) != nullptr) {
+    port_name_ = resolved_port;
+  }
   std::string port_name = port_name_;
 #ifdef LIST_SERIAL_PORT
   for(int i = 0; i < port_info.size(); i++){
@@ -119,6 +128,7 @@ bool CasiaHandMControl::Init()
     handm_list_[LEFT_HANDM_INDEX].reset(new(CasiaHandMProbuf)(l_handm_dev_id_, com_port_));
     handm_list_[RIGHT_HANDM_INDEX].reset(new(CasiaHandMProbuf)(r_handm_dev_id_, com_port_));
     
+    for (auto &hand : handm_list_) hand->SetStartupDeadline(startup_deadline);
     left_error = handm_list_[LEFT_HANDM_INDEX]->start();
 
     if(left_error != 0){
@@ -146,7 +156,7 @@ bool CasiaHandMControl::Init()
     {
 
     if(!getHandMSoftVersion(handm_state_get.handm_sys_soft_version)){
-       printf(FONT_RED "CasiaHandMControl, getHandMSoftVersion failed.\r\n" FONT_CLEAR);
+       LogTransportError("CasiaHandMControl, getHandMSoftVersion failed.");
        return false;
     }else{
       if(l_handm_connected_){ 
@@ -157,7 +167,7 @@ bool CasiaHandMControl::Init()
       }
      } 
     if(!getHandMHardwareVersion(handm_state_get.handm_sys_hardware_version)){
-       printf(FONT_RED "CasiaHandMControl, getHandMHardwareVersion failed.\r\n" FONT_CLEAR);
+       LogTransportError("CasiaHandMControl, getHandMHardwareVersion failed.");
        return false;
     }else{
       if(l_handm_connected_){ 
@@ -170,7 +180,7 @@ bool CasiaHandMControl::Init()
 
     do{
      if(!getHandMTemp(handm_state_get.handm_temp)){
-       printf(FONT_RED "CasiaHandMControl, getHandMTemp failed.\r\n" FONT_CLEAR);
+       LogTransportError("CasiaHandMControl, getHandMTemp failed.");
        return false;
      }else{
       if(l_handm_connected_){ 
@@ -182,7 +192,7 @@ bool CasiaHandMControl::Init()
      } 
      
     if(!getHandMState(handm_state_get.handm_sys_state)){
-       printf(FONT_RED "CasiaHandMControl, getHandMState failed.\r\n" FONT_CLEAR);
+       LogTransportError("CasiaHandMControl, getHandMState failed.");
        return false;
      }else{
       if(l_handm_connected_){ 
@@ -207,6 +217,8 @@ bool CasiaHandMControl::Init()
 
 
 
+    if (startup_timeout_s > 0 && std::chrono::steady_clock::now() >= startup_deadline) return false;
+    for (auto &hand : handm_list_) hand->SetStartupDeadline({});
     if (!StartHandMControlThread())
     {
       printf(FONT_RED "CasiaGraspControl thread starting error.\r\n" FONT_CLEAR);
@@ -232,11 +244,11 @@ bool CasiaHandMControl::Init()
         cur_temp[0]=temp_val*HANDM_SYS_TEMP;
         return true;
       }else{
-        printf(FONT_RED "getGraspTemp failed, ack timeout.\r\n" FONT_CLEAR);
+        LogTransportError("getGraspTemp failed, ack timeout.");
         return false;
       }
     }else{
-      printf(FONT_RED "getGraspTemp failed, device id: %d offline.\r\n" FONT_CLEAR, handm_list_[index]->GetDevId());
+      LogTransportError(std::string("getGraspTemp failed, device id: ") + std::to_string(handm_list_[index]->GetDevId()) + " offline.");
       return false;
     }
     return true;
@@ -244,7 +256,7 @@ bool CasiaHandMControl::Init()
 
   bool CasiaHandMControl::getHandMTemp(float* cur_temp){
     if(!com_port_connected_){
-      printf(FONT_RED "getGraspTemp failed, com port not connected.\r\n" FONT_CLEAR);
+      LogTransportError("getGraspTemp failed, com port not connected.");
       return false; }
     bool ret_val_l=true; bool ret_val_r = true;
     if(l_handm_connected_){
@@ -260,11 +272,11 @@ bool CasiaHandMControl::Init()
       if(handm_list_[index]->getSystemSoftVersion(soft_version)){
         return true;
       }else{
-        printf(FONT_RED "getGraspSoftVersion failed, ack timeout.\r\n" FONT_CLEAR);
+        LogTransportError("getGraspSoftVersion failed, ack timeout.");
         return false;
       }
     }else{
-      printf(FONT_RED "getGraspSoftVersion failed, device id: %d offline.\r\n" FONT_CLEAR, handm_list_[index]->GetDevId());
+      LogTransportError(std::string("getGraspSoftVersion failed, device id: ") + std::to_string(handm_list_[index]->GetDevId()) + " offline.");
       return false;
     }
     return true;
@@ -272,7 +284,7 @@ bool CasiaHandMControl::Init()
 
   bool CasiaHandMControl::getHandMSoftVersion(float* soft_version){
     if(!com_port_connected_){
-      printf(FONT_RED "getHandSoftVersion failed, com port not connected.\r\n" FONT_CLEAR);
+      LogTransportError("getHandSoftVersion failed, com port not connected.");
       return false; }
     bool ret_val_l=true; bool ret_val_r = true;
     if(l_handm_connected_){
@@ -288,11 +300,11 @@ bool CasiaHandMControl::Init()
       if(handm_list_[index]->getSystemHardwareVersion(hardware_version)){
         return true;
       }else{
-        printf(FONT_RED "getHandMHardwareVersion failed, ack timeout.\r\n" FONT_CLEAR);
+        LogTransportError("getHandMHardwareVersion failed, ack timeout.");
         return false;
       }
     }else{
-      printf(FONT_RED "getHandMHardwareVersion failed, device id: %d offline.\r\n" FONT_CLEAR, handm_list_[index]->GetDevId());
+      LogTransportError(std::string("getHandMHardwareVersion failed, device id: ") + std::to_string(handm_list_[index]->GetDevId()) + " offline.");
       return false;
     }
     return true;
@@ -300,7 +312,7 @@ bool CasiaHandMControl::Init()
 
   bool CasiaHandMControl::getHandMHardwareVersion(float* hardware_version){
     if(!com_port_connected_){
-      printf(FONT_RED "getHandMHardwareVersion failed, com port not connected.\r\n" FONT_CLEAR);
+      LogTransportError("getHandMHardwareVersion failed, com port not connected.");
       return false; }
     bool ret_val_l=true; bool ret_val_r = true;
     if(l_handm_connected_){
@@ -316,11 +328,11 @@ bool CasiaHandMControl::Init()
       if(handm_list_[index]->getError(cur_state)){
         return true;
       }else{
-        printf(FONT_RED "getGraspState failed, ack timeout.\r\n" FONT_CLEAR);
+        LogTransportError("getGraspState failed, ack timeout.");
         return false;
       }
     }else{
-      printf(FONT_RED "getGraspState failed, device id: %d offline.\r\n" FONT_CLEAR, handm_list_[index]->GetDevId());
+      LogTransportError(std::string("getGraspState failed, device id: ") + std::to_string(handm_list_[index]->GetDevId()) + " offline.");
       return false;
     }
     return true; 
@@ -328,7 +340,7 @@ bool CasiaHandMControl::Init()
 
   bool CasiaHandMControl::getHandMState(uint16_t* cur_state){
     if(!com_port_connected_){
-      printf(FONT_RED "getHandState failed, com port not connected.\r\n" FONT_CLEAR);
+      LogTransportError("getHandState failed, com port not connected.");
       return false; }
     bool ret_val_l=true; bool ret_val_r = true;
     if(l_handm_connected_){
@@ -381,11 +393,11 @@ bool CasiaHandMControl::Init()
         }  
         return true;
       }else {
-        printf(FONT_RED "setGraspTargetPosPowerSpeed failed, ack timeout.\r\n" FONT_CLEAR);
+        LogTransportError(std::string("setGraspTargetPosPowerSpeed failed, ack timeout, device id: ") + std::to_string(handm_list_[index]->GetDevId()));
         return false;
     }
    }else{
-    printf(FONT_RED "setGraspTargetPosPowerSpeed failed, device id: %d offline.\r\n" FONT_CLEAR, handm_list_[index]->GetDevId());
+    LogTransportError(std::string("setGraspTargetPosPowerSpeed failed, device id: ") + std::to_string(handm_list_[index]->GetDevId()) + " offline.");
     return false;
   }
   return true;
@@ -394,7 +406,7 @@ bool CasiaHandMControl::Init()
   bool CasiaHandMControl::setHandMTargetPosPowerSpeed(float* angle_buf,float* power_buf,float* speed_buf,float* cur_angle,float* cur_power)
   {
     if(!com_port_connected_){
-      printf(FONT_RED "setGraspTargetPosPowerSpeed failed, com port not connected.\r\n" FONT_CLEAR);
+      LogTransportError("setGraspTargetPosPowerSpeed failed, com port not connected.");
       return false; }
     bool ret_val_l=true; bool ret_val_r = true;
       if(l_handm_connected_){
@@ -434,11 +446,11 @@ bool CasiaHandMControl::Init()
       
         return true;
       }else {
-        printf(FONT_RED "getHandMPosPowerState failed, ack timeout.\r\n" FONT_CLEAR);
+        LogTransportError(std::string("getHandMPosPowerState failed, ack timeout, device id: ") + std::to_string(handm_list_[index]->GetDevId()));
         return false;
     }
    }else{
-    printf(FONT_RED "getHandMPosPowerState failed, device id: %d offline.\r\n" FONT_CLEAR, handm_list_[index]->GetDevId());
+    LogTransportError(std::string("getHandMPosPowerState failed, device id: ") + std::to_string(handm_list_[index]->GetDevId()) + " offline.");
     return false;
   }
     return true;
@@ -447,7 +459,7 @@ bool CasiaHandMControl::Init()
   bool CasiaHandMControl::getHandMPosPowerState(float* cur_angle,float* cur_power)
   {
     if(!com_port_connected_){
-      printf(FONT_RED "getHandPosPowerState failed, com port not connected.\r\n" FONT_CLEAR);
+      LogTransportError("getHandPosPowerState failed, com port not connected.");
       return false; }
     bool ret_val_l=true; bool ret_val_r = true;
     if(l_handm_connected_){
@@ -469,52 +481,54 @@ bool CasiaHandMControl::Init()
     return true;
   }
 
+  void CasiaHandMControl::LogTransportError(const std::string &message)
+  {
+    const auto now = std::chrono::steady_clock::now();
+    const auto found = last_error_log_.find(message);
+    if (found == last_error_log_.end() || now - found->second >= std::chrono::seconds(1)) {
+      last_error_log_[message] = now;
+      std::cerr << message << std::endl;
+    }
+  }
+
   void CasiaHandMControl::HandMControlThread()
   {
-  #define MS_PER_SEC 1000
-   while (run_flag_)
-   {
-     if(!handm_target_set_fifo.empty())
-      {
-       auto _data = handm_target_set_fifo.pop(std::ceil(MS_PER_SEC/HANDM_UPDATE_FREQ + 5));
-       if(_data)
-       {
-        handm_target_set_t target = static_cast<handm_target_set_t>(*_data);  
-        if(!setHandMTargetPosPowerSpeed(target.handm_angle,target.handm_power,target.handm_speed,handm_state_get.handm_angle,handm_state_get.handm_power))
-        {
-          printf(FONT_RED "CasiaHandMControl: update grasp_set_target fail.\r\n" FONT_CLEAR);   
+    try {
+      const auto half_period = std::chrono::milliseconds(
+          static_cast<int>(std::ceil(1000.0 / HANDM_UPDATE_FREQ / 2)));
+      while (run_flag_) {
+        auto data = handm_target_set_fifo.pop(0);
+        if (data && run_flag_) {
+          auto target = *data;
+          if (!setHandMTargetPosPowerSpeed(target.handm_angle, target.handm_power, target.handm_speed,
+                                         handm_state_get.handm_angle, handm_state_get.handm_power)) {
+            LogTransportError("CasiaHandMControl: update grasp_set_target fail");
+          }
         }
-        else
-        {
-          #ifdef SDK_DEBUG
-          printf(FONT_RED "CasiaHandMControl: update grasp_set_target ok.\r\n" FONT_CLEAR); 
-          #endif  
+        std::this_thread::sleep_for(half_period);
+        if (!run_flag_) break;
+        // Timestamp before polling either hand: a slow second reply must not
+        // make an older first-hand measurement appear newly sampled.
+        timespec sampled_at{};
+        clock_gettime(CLOCK_MONOTONIC, &sampled_at);
+        if (!getHandMPosPowerState(handm_state_get.handm_angle, handm_state_get.handm_power)) {
+          LogTransportError("CasiaHandMControl: getHandPosForceAngle fail");
+        } else {
+          handm_state_get.sampled_at_ns = static_cast<int64_t>(sampled_at.tv_sec) * 1000000000LL
+                                        + sampled_at.tv_nsec;
+          handm_state_fifo_get.push(handm_state_get);
         }
-       }
-       else
-       {
-          std::cout << "CasiaHandMControl:pop data from grasp_angle_set_fifo error!" << std::endl;
-       }
-      } 
-       
-     std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<uint16_t>(std::ceil(MS_PER_SEC /HANDM_UPDATE_FREQ/2))));
-     if(!getHandMPosPowerState(handm_state_get.handm_angle,handm_state_get.handm_power))
-     {
-       printf(FONT_RED "CasiaHandMControl: getHandPosForceAngle fail.\r\n" FONT_CLEAR);   
-     }
-     else
-     {
-   
-        //printf(FONT_YELLOW "CasiaGrasp_left,hand_pos_joint2: %f.\r\n" FONT_CLEAR, grasp_state_get.grasp_angle[4]);
-        //printf(FONT_YELLOW "CasiaGrasp_left,hand_pos_joint3: %f.\r\n" FONT_CLEAR, grasp_state_get.grasp_angle[5]);
-        //printf(FONT_YELLOW "CasiaGrasp_left,hand_pos_joint1: %f.\r\n" FONT_CLEAR, grasp_state_get.grasp_angle[6]);
-        //printf(FONT_YELLOW "CasiaGrasp_left,hand_pos_joint2: %f.\r\n" FONT_CLEAR, grasp_state_get.grasp_angle[7]);
-       // Publish only successful serial samples. Consumers can then use queue
-       // consumption as a reliable hardware-freshness edge.
-       handm_state_fifo_get.push(handm_state_get);
-     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<uint16_t>(std::ceil(MS_PER_SEC / HANDM_UPDATE_FREQ/2))));
-   } 
+        std::this_thread::sleep_for(half_period);
+      }
+    } catch (const std::exception &error) {
+      transport_failed_ = true;
+      run_flag_ = false;
+      LogTransportError(std::string("CasiaHandMControl: serial worker stopped: ") + error.what());
+    } catch (...) {
+      transport_failed_ = true;
+      run_flag_ = false;
+      LogTransportError("CasiaHandMControl: serial worker stopped with an unknown exception");
+    }
   }
 
    void CasiaHandMControl::SetHandMTargetoQueue(casia::HandM::handm_target_set_t &target)

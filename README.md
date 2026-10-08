@@ -330,3 +330,26 @@ The serial library license is retained at
 `sdk/third_party/serial/LICENSE`. The CASIA SDK sources remain subject to the
 vendor's distribution terms; confirm those terms before publishing this
 repository outside your organization.
+
+## Optional automatic reconnection
+
+`CasiaHandConfig(auto_reconnect=True)` allows startup without hardware and retries
+hot-unplug/power failures in the existing worker. Defaults are a 0.25 s feedback
+freshness limit, a 1 s feedback-loss reconnect threshold, a 1 s retry delay, and a
+5 s initialization/feedback-qualification budget. Three distinct recent dual-hand
+samples qualify a new connection. Old commands are discarded; initial resumed
+commands slew from measured positions at 1 rad/s until the target is reached.
+Disabling takeover offline never schedules a delayed return-to-zero command.
+
+Connection status is available through `connected`, `connection_state`,
+`connection_generation`, `reconnect_attempts`, `last_error` and `joint_state_age_s`
+in `get_data()`. Callers must gate their full action/observation stream on fresh
+feedback and invalidate their own action sessions on outages or generation changes.
+The SDK alone cannot invalidate commands cached by a remote policy process.
+
+Linux device discovery tracks a unique USB serial number, otherwise the physical
+USB port, across tty renumbering. Initial discovery waits on ambiguous devices.
+The original synchronous startup and fatal-error behavior remain the default when
+`auto_reconnect=False`. Rebuild the native extension after updating this code;
+reconnection uses the new timestamped sample, command clearing and initialization
+deadline APIs.
