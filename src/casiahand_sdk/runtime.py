@@ -136,6 +136,10 @@ class CasiaHandRuntime:
         self._thread = threading.Thread(target=self._run, name="CasiaHandRuntime", daemon=True)
         self._thread.start()
         if self._auto_reconnect:
+            # Give a present device its first qualification opportunity before
+            # the owner starts USB cameras. Missing hardware still returns on
+            # the first failed attempt, and never blocks startup indefinitely.
+            self._ready.wait(cfg.startup_timeout_s)
             return
         if not self._ready.wait(cfg.startup_timeout_s):
             self.close()
@@ -270,9 +274,8 @@ class CasiaHandRuntime:
             hand = None
             retry = False
             try:
-                attempt_started_at = time.monotonic()
                 hand = self._hand_factory(self.cfg)
-                self._serve_hand(hand, attempt_started_at)
+                self._serve_hand(hand)
             except Exception as exc:
                 self._invalidate_connection(exc)
                 if self._auto_reconnect and isinstance(exc, (OSError, RuntimeError)):
@@ -299,11 +302,16 @@ class CasiaHandRuntime:
         with self._lock:
             self._connection_state = "STOPPED"
 
-    def _serve_hand(self, hand, started_at):
+    def _serve_hand(self, hand):
         state_period = 1.0 / self.cfg.joint_state_fps
+        # init() has its own native deadline. Do not consume the feedback
+        # qualification budget while probing the serial devices.
+        started_at = time.monotonic()
         next_state_at = started_at
         last_sample_at = None
         consecutive_samples = 0
+        last_received_sample_at = None
+        rejected_samples = 0
         active_frame = None
         recovering = self._auto_reconnect
         recovery_position = None
@@ -315,7 +323,8 @@ class CasiaHandRuntime:
             if self._connected:
                 self._connection_state = "CONNECTED"
                 self._connection_generation += 1
-        self._ready.set()
+        if not self._auto_reconnect:
+            self._ready.set()
         while not self._stop.is_set():
             now = time.monotonic()
             if getattr(hand, "transport_failed", False):
@@ -323,9 +332,19 @@ class CasiaHandRuntime:
             if now >= next_state_at:
                 sample_reader = getattr(hand, "try_get_joint_sample", None)
                 sample = sample_reader() if sample_reader is not None else hand.try_get_joint_positions()
+                if sample_reader is not None and sample is not None:
+                    # A native read releases the GIL. If another startup worker
+                    # held it before our return, this consumed sample may be old
+                    # while the native worker has already published a fresh one.
+                    age = time.monotonic() - sample[1]
+                    if age < 0 or age > self.cfg.joint_state_timeout_s:
+                        latest = sample_reader()
+                        if latest is not None:
+                            sample = latest
                 if sample is not None:
                     positions, sampled_at = sample if sample_reader is not None else (sample, time.monotonic())
                     measured = self._validate_measured_positions(positions)
+                    last_received_sample_at = sampled_at
                     now = time.monotonic()
                     # Native timestamps use Linux CLOCK_MONOTONIC, like time.monotonic().
                     if 0 <= now - sampled_at <= self.cfg.joint_state_timeout_s and (
@@ -349,6 +368,9 @@ class CasiaHandRuntime:
                                 recovery_position = measured.copy()
                                 last_send_at = now
                                 logger.warning("CASIA Hand connected, generation %d", self._connection_generation)
+                                self._ready.set()
+                    else:
+                        rejected_samples += 1
                 next_state_at = now + state_period
 
             with self._lock:
@@ -364,8 +386,13 @@ class CasiaHandRuntime:
                         clear_commands()
                 previously_fresh = state_fresh
                 previous_gate_epoch = gate_epoch
-                if not connected and now - started_at >= self.cfg.startup_timeout_s:
-                    raise ConnectionError("CASIA dual-hand feedback did not recover before startup timeout")
+                if not connected and not state_fresh and now - started_at >= self.cfg.startup_timeout_s:
+                    sample_age = None if last_received_sample_at is None else now - last_received_sample_at
+                    raise ConnectionError(
+                        "CASIA dual-hand feedback did not recover before startup timeout "
+                        f"(valid_samples={consecutive_samples}/3, rejected_samples={rejected_samples}, "
+                        f"latest_sample_age_s={sample_age})"
+                    )
                 if connected and now - last_sample_at >= self.cfg.reconnect_timeout_s:
                     raise ConnectionError("CASIA dual-hand feedback timed out")
                 if not state_fresh:

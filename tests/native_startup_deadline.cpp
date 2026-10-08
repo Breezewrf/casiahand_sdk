@@ -1,6 +1,7 @@
 // Exercise the real serial timeout/cleanup on a PTY, without robot hardware.
 #include <chrono>
 #include <iostream>
+#include <fcntl.h>
 #include <pty.h>
 #include <string>
 #include <unistd.h>
@@ -29,12 +30,15 @@ int main() {
   close(slave);
   casia::HandM::CasiaHandM hand(2, 32, 115200, test_port);
   const auto started_at = std::chrono::steady_clock::now();
-  const bool initialized = hand.init(0.08);
+  const bool initialized = hand.init(0.35);
   const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started_at).count();
   hand.shutdown();
   hand.shutdown();
+  fcntl(master, F_SETFL, O_NONBLOCK);
+  char request[64]{};
+  const auto request_size = read(master, request, sizeof(request));
   close(master);
-  if (initialized || elapsed < 0.04 || elapsed > 0.5) {
+  if (initialized || elapsed < 0.30 || elapsed > 0.70 || request_size <= 0) {
     std::cerr << "unexpected native initialization result: " << initialized << ", " << elapsed << " s\n";
     return 1;
   }

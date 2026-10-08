@@ -125,6 +125,23 @@ bool CasiaHandMControl::Init(double startup_timeout_s)
     int left_error = 0;  int right_error = 0;
     com_port_connected_ = true;
     printf(FONT_GREEN "CasiaHandMControl: Serial port %s openned\r\n" FONT_CLEAR, port_name_.c_str());
+    // CH341 may expose an open tty before RX is ready after a previous close.
+    // Discard partial replies and allow the adapter a short quiet period before
+    // probing either hand. This wait remains inside the native startup budget.
+    try {
+      com_port_->flush();
+    } catch (const std::exception &error) {
+      std::cerr << "CasiaHandMControl: startup serial flush failed: " << error.what() << std::endl;
+      return false;
+    }
+    auto quiet_period = std::chrono::steady_clock::duration(std::chrono::milliseconds(250));
+    if (startup_timeout_s > 0) {
+      const auto remaining = startup_deadline - std::chrono::steady_clock::now();
+      if (remaining <= std::chrono::steady_clock::duration::zero()) return false;
+      quiet_period = std::min(quiet_period, remaining);
+    }
+    std::this_thread::sleep_for(quiet_period);
+    if (startup_timeout_s > 0 && std::chrono::steady_clock::now() >= startup_deadline) return false;
     handm_list_[LEFT_HANDM_INDEX].reset(new(CasiaHandMProbuf)(l_handm_dev_id_, com_port_));
     handm_list_[RIGHT_HANDM_INDEX].reset(new(CasiaHandMProbuf)(r_handm_dev_id_, com_port_));
     

@@ -336,7 +336,10 @@ repository outside your organization.
 `CasiaHandConfig(auto_reconnect=True)` allows startup without hardware and retries
 hot-unplug/power failures in the existing worker. Defaults are a 0.25 s feedback
 freshness limit, a 1 s feedback-loss reconnect threshold, a 1 s retry delay, and a
-5 s initialization/feedback-qualification budget. Three distinct recent dual-hand
+separate 5 s budgets for initialization and subsequent feedback qualification.
+Construction waits up to 5 s for initial qualification or a failed attempt before
+returning, reducing contention with the caller's camera startup. Missing hardware
+continues retrying in the background. Three distinct recent dual-hand
 samples qualify a new connection. Old commands are discarded; initial resumed
 commands slew from measured positions at 1 rad/s until the target is reached.
 Disabling takeover offline never schedules a delayed return-to-zero command.

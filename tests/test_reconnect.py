@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import numpy as np
+
 from casiahand_sdk import CasiaHandConfig, CasiaHandRuntime
 from casiahand_sdk.serial_port import SerialPortResolver, UsbSerialDevice, discover_usb_serial
 
@@ -60,6 +61,69 @@ class TestReconnect(unittest.TestCase):
                 return
             time.sleep(0.002)
         self.fail("condition did not become true before deadline")
+
+    def test_present_device_qualifies_before_constructor_returns(self):
+        hand = StreamingHand()
+        runtime = CasiaHandRuntime(self.cfg(), hand_factory=lambda _: hand)
+        try:
+            self.assertTrue(runtime.get_data()["connected"])
+            self.assertTrue(runtime.get_data()["joint_state_fresh"])
+        finally:
+            runtime.close()
+
+    def test_initialization_does_not_consume_feedback_qualification_budget(self):
+        class SlowSamplingHand(StreamingHand):
+            def try_get_joint_sample(self):
+                time.sleep(0.01)
+                return super().try_get_joint_sample()
+
+        hand = SlowSamplingHand()
+        calls = []
+
+        def factory(cfg):
+            calls.append(True)
+            time.sleep(0.035)
+            return hand
+
+        runtime = CasiaHandRuntime(self.cfg(startup_timeout_s=0.05), hand_factory=factory)
+        try:
+            self.wait_for(lambda: runtime.get_data()["connected"])
+            self.assertEqual(len(calls), 1)
+            self.assertFalse(hand.closed)
+        finally:
+            runtime.close()
+
+    def test_delayed_python_read_rechecks_latest_feedback_before_reconnecting(self):
+        class DelayedReadHand(StreamingHand):
+            pause_once = False
+
+            def try_get_joint_sample(self):
+                sample = super().try_get_joint_sample()
+                if self.pause_once:
+                    self.pause_once = False
+                    time.sleep(0.12)
+                    delayed.set()
+                return sample
+
+        delayed = threading.Event()
+        hand = DelayedReadHand()
+        calls = []
+
+        def factory(cfg):
+            calls.append(True)
+            return hand
+
+        runtime = CasiaHandRuntime(self.cfg(), hand_factory=factory)
+        try:
+            self.assertTrue(runtime.get_data()["connected"])
+            hand.pause_once = True
+            self.assertTrue(delayed.wait(1.0))
+            self.wait_for(lambda: runtime.get_data()["joint_state_fresh"])
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(runtime.get_data()["connection_generation"], 1)
+            self.assertFalse(hand.closed)
+        finally:
+            runtime.close()
 
     def test_missing_at_startup_retries_without_blocking_or_raising(self):
         allow_connect = threading.Event()
